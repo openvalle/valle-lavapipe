@@ -48,6 +48,14 @@ $env:VK_DRIVER_FILES = "C:\path\to\valle-lavapipe\lib\lvp_icd.x86_64.json"
 
 For wgpu, also set `WGPU_BACKEND=vulkan` and `WGPU_ADAPTER_NAME=llvmpipe`.
 
+An elevated process on Windows, such as an administrator shell or a GitHub Actions runner,
+ignores `VK_DRIVER_FILES`; the loader then reads drivers only from the registry. Register the
+manifest there instead, from an administrator shell:
+
+```powershell
+reg add HKLM\SOFTWARE\Khronos\Vulkan\Drivers /v "C:\path\to\valle-lavapipe\lib\lvp_icd.x86_64.json" /t REG_DWORD /d 0 /f
+```
+
 ## Development
 
 CI downloads inputs from [sources.txt](sources.txt), verifies checksums, then builds and tests
