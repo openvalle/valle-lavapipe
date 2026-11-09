@@ -1,0 +1,9 @@
+/sources/
+/build/
+/dist/
+/check/
+*.part
+*.exe
+*.obj
+output.txt
+summary.txt
