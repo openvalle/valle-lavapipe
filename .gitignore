@@ -2,6 +2,7 @@
 /build/
 /dist/
 /check/
+.DS_Store
 *.part
 *.exe
 *.obj

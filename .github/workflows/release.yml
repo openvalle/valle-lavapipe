@@ -22,7 +22,20 @@ env:
   RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
 jobs:
   linux:
-    runs-on: ubuntu-24.04
+    name: Linux ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+            image: quay.io/pypa/manylinux_2_28_x86_64@sha256:9555ba6c479fa69a2aa80ad1dc57154a60d562b19df159361d9379a02beb1e36
+          - arch: aarch64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            image: quay.io/pypa/manylinux_2_28_aarch64@sha256:cb37f0d66c8a75abb93cf6085cad1f1427cd7208f0c0fc48359bb1eea9924f21
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -31,64 +44,77 @@ jobs:
           persist-credentials: false
       - name: Download and verify sources
         run: >
-          scripts/fetch.sh mesa-25.2.7.tar.xz llvm-21.1.6.src.tar.xz cmake-21.1.6.src.tar.xz
-          third-party-21.1.6.src.tar.xz libdrm-2.4.134.tar.xz Vulkan-Loader-1.4.328.tar.gz
-          Vulkan-Headers-1.4.328.tar.gz glslang-16.6.0.tar.gz
+          scripts/fetch.sh mesa-26.2.6.tar.xz llvm-project-23.1.5.src.tar.xz libdrm-2.4.134.tar.xz Vulkan-Loader-1.4.368.tar.gz
+          Vulkan-Headers-1.4.368.tar.gz glslang-16.6.0.tar.gz
       # glibc 2.28: the package runs on that and anything newer.
       - name: Build in manylinux_2_28
         run: |
-          docker run --rm -e VERSION="${RELEASE_TAG#v}" -v "$PWD:/work" \
-            quay.io/pypa/manylinux_2_28_x86_64@sha256:9555ba6c479fa69a2aa80ad1dc57154a60d562b19df159361d9379a02beb1e36 \
+          test "$(uname -m)" = '${{ matrix.arch }}'
+          docker run --rm --platform '${{ matrix.platform }}' -e VERSION="${RELEASE_TAG#v}" -v "$PWD:/work" \
+            '${{ matrix.image }}' \
             /work/scripts/build-linux.sh
           sudo chown -R "$(id -u):$(id -g)" dist
       - name: Run the probe on bare distributions
         run: |
-          name="valle-lavapipe-${RELEASE_TAG#v}-linux-x86_64"
+          name="valle-lavapipe-${RELEASE_TAG#v}-linux-${{ matrix.arch }}"
           tar -xzf "dist/$name.tar.gz" -C dist
           for image in almalinux:8-minimal ubuntu:22.04 debian:12 ubuntu:24.04; do
-            docker run --rm -v "$PWD/dist:/dist:ro" -v "$PWD/tests:/tests:ro" "$image" sh /tests/run.sh "$name"
+            docker run --rm --platform '${{ matrix.platform }}' -v "$PWD/dist:/dist:ro" -v "$PWD/tests:/tests:ro" "$image" sh /tests/run.sh "$name"
           done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: linux
+          name: linux-${{ matrix.arch }}
           path: dist/*.tar.gz
           if-no-files-found: error
 
   windows:
-    runs-on: windows-2025
-    timeout-minutes: 30
+    name: Windows ${{ matrix.cpu }} (MSVC)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            cpu: x86_64
+            runner: windows-2025-vs2026
+          - arch: arm64
+            cpu: aarch64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
-      - name: Download and verify sources
-        shell: bash
-        run: >
-          scripts/fetch.sh mesa3d-25.2.7-release-msvc.7z VulkanRT-X64-1.4.328.1-Components.zip
-          mesa-25.2.7.tar.xz mesa-dist-win-LICENSE llvm-LICENSE.TXT Vulkan-Headers-1.4.328.tar.gz
-      - name: Package
-        shell: bash
-        run: VERSION="${RELEASE_TAG#v}" scripts/package-windows.sh
-      # The probe beside the loader loads that one, not any in System32. The runner is
-      # elevated, and an elevated loader ignores VK_DRIVER_FILES and reads drivers only from
-      # HKLM, so the manifest is registered there. On failure, rerun with the loader's log.
-      - name: Run the probe with the package
-        shell: bash
+      - name: Build LLVM, Lavapipe and Vulkan Loader from source
+        shell: pwsh
         run: |
-          name="valle-lavapipe-${RELEASE_TAG#v}-windows-x86_64"
-          mkdir check && tar -xzf "dist/$name.tar.gz" -C check
-          lib="check/$name/lib"
-          tar -xzf sources/Vulkan-Headers-1.4.328.tar.gz -C check
-          clang -O2 -Wall -D_CRT_SECURE_NO_WARNINGS -Icheck/Vulkan-Headers-1.4.328/include -Itests \
-            -o "$lib/probe.exe" tests/probe.c
-          reg add 'HKLM\SOFTWARE\Khronos\Vulkan\Drivers' //v "$(cygpath -w "$PWD/$lib/lvp_icd.x86_64.json")" //t REG_DWORD //d 0 //f
-          "$lib/probe.exe" || { VK_LOADER_DEBUG=all "$lib/probe.exe"; exit 1; }
+          New-Item -ItemType Directory -Force build | Out-Null
+          Start-Transcript -Path "build/windows-${{ matrix.cpu }}.log"
+          try {
+            ./scripts/build-windows.ps1 -Architecture '${{ matrix.arch }}' -Version ($env:RELEASE_TAG.TrimStart('v')) -Jobs 3
+          } finally {
+            Stop-Transcript
+          }
+      - name: Run the probe with the package
+        shell: pwsh
+        run: |
+          $version = $env:RELEASE_TAG.TrimStart('v')
+          ./tests/run-windows.ps1 -Package "dist/valle-lavapipe-$version-windows-${{ matrix.cpu }}.zip"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows
-          path: dist/*.tar.gz
+          name: windows-${{ matrix.cpu }}
+          path: dist/*.zip
           if-no-files-found: error
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-${{ matrix.cpu }}-logs
+          path: |
+            build/windows-*.log
+            build/windows-msvc/**/meson-logs/meson-log.txt
+            build/windows-msvc/**/CMakeFiles/CMakeConfigureLog.yaml
 
   publish:
     needs: [linux, windows]
@@ -107,5 +133,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd dist
-          for f in *.tar.gz; do sha256sum "$f" > "$f.sha256"; done
-          gh release upload "$RELEASE_TAG" *.tar.gz *.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+          for f in *.tar.gz *.zip; do sha256sum "$f" > "$f.sha256"; done
+          gh release upload "$RELEASE_TAG" *.tar.gz *.zip *.sha256 --clobber --repo "$GITHUB_REPOSITORY"

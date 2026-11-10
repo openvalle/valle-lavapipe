@@ -1,18 +1,10 @@
 # Every input the packages are made from: sha256, file name, URL. scripts/fetch.sh downloads
 # into sources/ and checks each hash; a mismatch fails the build.
 
-# Linux: built from source.
-b40232a642011820211aab5a9cdf754e106b0bce15044bc4496b0ac9615892ad  mesa-25.2.7.tar.xz  https://archive.mesa3d.org/mesa-25.2.7.tar.xz
-908bce97be0275943414b45af2e2b20e8f6d5d9266fdc120bd59f096ebc547ad  llvm-21.1.6.src.tar.xz  https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.6/llvm-21.1.6.src.tar.xz
-e364f135fa14c343d70cac96f577f44e8e20bf026682f647f8c3c5687a0bebd1  cmake-21.1.6.src.tar.xz  https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.6/cmake-21.1.6.src.tar.xz
-8d09dc219cdb3da7dafd2161836aacdd6e02c1a113498ab5f37688599406dc8a  third-party-21.1.6.src.tar.xz  https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.6/third-party-21.1.6.src.tar.xz
+# Linux and Windows: built from source. libdrm is Linux-only.
+b9436b3e1a8be76fbd4823dc884f90596ab7c6ac5e1867a305e66ffccfb31a92  mesa-26.2.6.tar.xz  https://archive.mesa3d.org/mesa-26.2.6.tar.xz
+fb50b1eac93ddeb3aa8dab4cfe324dff74f4a9c2bdee6160c9e36188f8d06a6e  llvm-project-23.1.5.src.tar.xz  https://github.com/llvm/llvm-project/releases/download/llvmorg-23.1.5/llvm-project-23.1.5.src.tar.xz
 ac5e74d157830eb8bee44c6a6bf3ad49774ef0dd2a72bdad74a8f20308b52a95  libdrm-2.4.134.tar.xz  https://dri.freedesktop.org/libdrm/libdrm-2.4.134.tar.xz
-07b5bae70dabdd2ee5a0fdaea95f72dac9561ddd768b0739d4af6cb8771e9ac8  Vulkan-Loader-1.4.328.tar.gz  https://github.com/KhronosGroup/Vulkan-Loader/archive/refs/tags/v1.4.328.tar.gz
-3ad56d387179b47dd632432ccf989bbb69773e1d732692b7bbad9c4d36aa1304  Vulkan-Headers-1.4.328.tar.gz  https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.328.tar.gz
+d2fe102c8493d80f2e3d6c5b3304a331e69072d7a041b1323c6f0246b94cbf3c  Vulkan-Loader-1.4.368.tar.gz  https://github.com/KhronosGroup/Vulkan-Loader/archive/refs/tags/v1.4.368.tar.gz
+5c5c6f64fcce28a24cc934143a048707af036a858e4ed11d7f71fe016006ecda  Vulkan-Headers-1.4.368.tar.gz  https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.368.tar.gz
 9c09b901149c729df745057dafa815278aaa101b84d2b6e14f16a42de52f97f2  glslang-16.6.0.tar.gz  https://github.com/KhronosGroup/glslang/archive/refs/tags/16.6.0.tar.gz
-
-# Windows: upstream release binaries, repackaged.
-476317bd7f0ba692965e26a449dc0b54ee6ab475297f0d644bfd1f795db2887d  mesa3d-25.2.7-release-msvc.7z  https://github.com/pal1000/mesa-dist-win/releases/download/25.2.7/mesa3d-25.2.7-release-msvc.7z
-293efbb2c11e60429df7770f40e3c5c811a7fa42af81de0cc41e8718ddb2b373  VulkanRT-X64-1.4.328.1-Components.zip  https://sdk.lunarg.com/sdk/download/1.4.328.1/windows/VulkanRT-X64-1.4.328.1-Components.zip
-9cd0121dc070f0ac65c1fc266bee74bdbbc22cea4210ae72ae0c1f076448d4cc  mesa-dist-win-LICENSE  https://raw.githubusercontent.com/pal1000/mesa-dist-win/25.2.7/LICENSE
-8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee  llvm-LICENSE.TXT  https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-21.1.6/llvm/LICENSE.TXT

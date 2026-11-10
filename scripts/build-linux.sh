@@ -1,33 +1,39 @@
 #!/bin/bash
 # Builds lavapipe and the Vulkan loader as one folder that needs only glibc 2.28. Runs inside
-# quay.io/pypa/manylinux_2_28_x86_64 with the repository at /work and the inputs already in
-# /work/sources (scripts/fetch.sh); writes dist/valle-lavapipe-$VERSION-linux-x86_64.tar.gz.
+# quay.io/pypa/manylinux_2_28_{x86_64,aarch64} with the repository at /work and the inputs
+# already in /work/sources (scripts/fetch.sh); builds for the container's native architecture.
 set -euo pipefail
 
 : "${VERSION:?set VERSION, such as 0.1.0}"
+BUILD_ARCH=$(uname -m)
+case "$BUILD_ARCH" in
+  x86_64) LLVM_TARGET=X86; ELF_LOADER=ld-linux-x86-64 ;;
+  aarch64) LLVM_TARGET=AArch64; ELF_LOADER=ld-linux-aarch64 ;;
+  *) echo "unsupported Linux architecture: $BUILD_ARCH"; exit 1 ;;
+esac
 JOBS=${JOBS:-$(nproc)}
 SRC=/work/sources
 B=/build
 PREFIX=$B/prefix
-NAME=valle-lavapipe-$VERSION-linux-x86_64
+NAME=valle-lavapipe-$VERSION-linux-$BUILD_ARCH
 mkdir -p "$B" "$PREFIX" /work/dist
 cd "$B"
 
 echo "=== Installing build tools"
 dnf install -y bison flex
 /opt/python/cp312-cp312/bin/python -m venv "$B/venv"
-"$B/venv/bin/pip" install --quiet meson==1.8.5 ninja==1.13.2 cmake==3.31.10 mako==1.4.3 pyyaml==6.0.3 packaging==26.3
+"$B/venv/bin/pip" install --quiet meson==1.12.1 ninja==1.13.2 cmake==4.4.4 mako==1.4.3 pyyaml==6.0.3 packaging==26.3
 export PATH="$B/venv/bin:$PATH"
 
-echo "=== Building LLVM 21.1.6 (static, X86 only)"
-mkdir llvm-src
-for t in llvm cmake third-party; do
-  tar xJf "$SRC/$t-21.1.6.src.tar.xz" -C llvm-src
-  mv "llvm-src/$t-21.1.6.src" "llvm-src/$t"
-done
+echo "=== Building LLVM 23.1.5 (static, $LLVM_TARGET only)"
+mkdir -p llvm-src
+# LLVM 23 also needs libc's common utilities while configuring LLVM itself.
+tar xJf "$SRC/llvm-project-23.1.5.src.tar.xz" -C llvm-src --strip-components=1 \
+  llvm-project-23.1.5.src/llvm llvm-project-23.1.5.src/cmake \
+  llvm-project-23.1.5.src/third-party llvm-project-23.1.5.src/libc
 cmake -G Ninja -S llvm-src/llvm -B llvm-build \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-  -DLLVM_TARGETS_TO_BUILD=X86 -DLLVM_ENABLE_PROJECTS= \
+  -DLLVM_TARGETS_TO_BUILD="$LLVM_TARGET" -DLLVM_ENABLE_PROJECTS= \
   -DLLVM_BUILD_TOOLS=OFF -DLLVM_INCLUDE_TOOLS=ON -DLLVM_BUILD_UTILS=OFF \
   -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF \
   -DLLVM_INCLUDE_DOCS=OFF -DLLVM_ENABLE_BINDINGS=OFF \
@@ -65,16 +71,16 @@ meson setup libdrm-build libdrm-2.4.134 --prefix="$PREFIX" --libdir=lib \
 ninja -C libdrm-build -j"$JOBS" install
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
 
-echo "=== Building Mesa 25.2.7 (lavapipe only)"
+echo "=== Building Mesa 26.2.6 (lavapipe only)"
 # Mesa: lavapipe only, with LLVM, libdrm and the C++ runtime linked in. The image's libdrm-devel
 # goes first, so only the static one above is found. The version script exports only the
 # loader's entry points: exported symbols are roots that --gc-sections keeps, so exporting
 # LLVM's would keep all of LLVM.
 rpm -e --nodeps libdrm-devel 2>/dev/null || true
-tar xJf "$SRC/mesa-25.2.7.tar.xz"
+tar xJf "$SRC/mesa-26.2.6.tar.xz"
 printf '{\n  global: vk_icd*;\n  local: *;\n};\n' > "$B/lvp.map"
 printf '[binaries]\nllvm-config = %s\n' "'$PREFIX/bin/llvm-config'" > native.ini
-meson setup mesa-build mesa-25.2.7 --native-file native.ini \
+meson setup mesa-build mesa-26.2.6 --native-file native.ini \
   --prefix=/usr --libdir=lib --buildtype=release -Db_ndebug=true \
   -Dvulkan-drivers=swrast -Dgallium-drivers= -Dplatforms= \
   -Dopengl=false -Dgles1=disabled -Dgles2=disabled -Dglvnd=disabled \
@@ -83,20 +89,20 @@ meson setup mesa-build mesa-25.2.7 --native-file native.ini \
   -Dzlib=disabled -Dzstd=disabled -Dxmlconfig=disabled -Dexpat=disabled \
   -Dlibunwind=disabled -Dvalgrind=disabled -Dlmsensors=disabled \
   -Dandroid-libbacktrace=disabled -Dmicrosoft-clc=disabled \
-  -Dgallium-va=disabled -Dgallium-vdpau=disabled -Dvideo-codecs= \
+  -Dgallium-va=disabled -Dvideo-codecs= \
   -Dvulkan-layers= -Dtools= -Dbuild-tests=false \
   -Dcpp_link_args="-static-libstdc++ -static-libgcc -Wl,--version-script=$B/lvp.map" \
   -Dc_link_args="-static-libgcc -Wl,--version-script=$B/lvp.map"
 ninja -C mesa-build -j"$JOBS"
 DESTDIR="$B/mesa-install" ninja -C mesa-build install
 
-echo "=== Building Vulkan loader 1.4.328"
+echo "=== Building Vulkan loader 1.4.368"
 # The Vulkan loader, without any window system.
-tar xzf "$SRC/Vulkan-Headers-1.4.328.tar.gz"
-tar xzf "$SRC/Vulkan-Loader-1.4.328.tar.gz"
-cmake -G Ninja -S Vulkan-Headers-1.4.328 -B headers-build -DCMAKE_INSTALL_PREFIX="$PREFIX"
+tar xzf "$SRC/Vulkan-Headers-1.4.368.tar.gz"
+tar xzf "$SRC/Vulkan-Loader-1.4.368.tar.gz"
+cmake -G Ninja -S Vulkan-Headers-1.4.368 -B headers-build -DCMAKE_INSTALL_PREFIX="$PREFIX"
 ninja -C headers-build install
-cmake -G Ninja -S Vulkan-Loader-1.4.328 -B loader-build \
+cmake -G Ninja -S Vulkan-Loader-1.4.368 -B loader-build \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PREFIX" -DCMAKE_INSTALL_PREFIX=/usr \
   -DBUILD_WSI_XCB_SUPPORT=OFF -DBUILD_WSI_XLIB_SUPPORT=OFF -DBUILD_WSI_XLIB_XRANDR_SUPPORT=OFF \
   -DBUILD_WSI_WAYLAND_SUPPORT=OFF -DBUILD_WSI_DIRECTFB_SUPPORT=OFF -DBUILD_TESTS=OFF \
@@ -112,24 +118,24 @@ mkdir -p "$P/lib" "$P/licenses"
 cp "$(find "$B/mesa-install" -name libvulkan_lvp.so -print -quit)" "$P/lib/libvulkan_lvp.so"
 cp "$(find "$B/loader-install" -name 'libvulkan.so.1.*' -type f -print -quit)" "$P/lib/libvulkan.so.1"
 strip --strip-unneeded "$P/lib/"*.so*
-python3 - "$(find "$B/mesa-install" -name lvp_icd.x86_64.json -print -quit)" "$P/lib/lvp_icd.x86_64.json" <<'EOF'
+python3 - "$(find "$B/mesa-install" -name "lvp_icd.$BUILD_ARCH.json" -print -quit)" "$P/lib/lvp_icd.$BUILD_ARCH.json" <<'EOF'
 import json, sys
 m = json.load(open(sys.argv[1]))
 m["ICD"]["library_path"] = "./libvulkan_lvp.so"
 json.dump(m, open(sys.argv[2], "w"), indent=4)
 EOF
-cp mesa-25.2.7/docs/license.rst "$P/licenses/mesa.rst"
-cp mesa-25.2.7/licenses/MIT "$P/licenses/mesa-MIT.txt"
-cp mesa-25.2.7/licenses/BSL-1.0 "$P/licenses/mesa-BSL-1.0.txt"
+cp mesa-26.2.6/docs/license.rst "$P/licenses/mesa.rst"
+cp mesa-26.2.6/licenses/MIT "$P/licenses/mesa-MIT.txt"
+cp mesa-26.2.6/licenses/BSL-1.0 "$P/licenses/mesa-BSL-1.0.txt"
 cp llvm-src/llvm/LICENSE.TXT "$P/licenses/llvm.txt"
-cp Vulkan-Loader-1.4.328/LICENSE.txt "$P/licenses/vulkan-loader.txt"
+cp Vulkan-Loader-1.4.368/LICENSE.txt "$P/licenses/vulkan-loader.txt"
 # libdrm ships no license file; its MIT terms are in each source's header.
 sed -n '8,/^ \*\/$/p' libdrm-2.4.134/xf86drm.h > "$P/licenses/libdrm.txt"
 cp /work/THIRD_PARTY.md "$P/"
 
 echo "=== Validating"
 # Nothing but glibc, and the loader's three entry points.
-if readelf -d "$P/lib/"*.so* | grep NEEDED | grep -v -E '\[(libc|libm|libdl|libpthread|librt|ld-linux-x86-64)\.so\.[0-9]+\]'; then
+if readelf -d "$P/lib/"*.so* | grep NEEDED | grep -v -E "\[(libc|libm|libdl|libpthread|librt|$ELF_LOADER)\.so\.[0-9]+\]"; then
   echo "a dependency outside glibc"; exit 1
 fi
 glibc=$(objdump -T "$P/lib/"*.so* | grep -o -E 'GLIBC_[0-9.]+' | sort -t. -k1,1 -k2,2n -k3,3n -u | tail -1)
@@ -144,4 +150,4 @@ echo "Built /work/dist/$NAME.tar.gz"
 
 echo "=== Building the probe"
 # Built here too, so it needs nothing newer than the package does; it is not in the package.
-gcc -O2 -Wall -I"$PREFIX/include" -I/work/tests -o /work/dist/probe /work/tests/probe.c -ldl -lm
+gcc -O2 -Wall -I"$PREFIX/include" -I/work/tests -o "/work/dist/probe-$BUILD_ARCH" /work/tests/probe.c -ldl -lm

@@ -1,5 +1,5 @@
-// Loads the Vulkan loader by name, as wgpu does; creates an instance and a device on the first
-// physical device; then compiles a compute shader, which lavapipe JIT-compiles with LLVM, runs
+// Loads the Vulkan loader by name, as wgpu does; creates an instance and a device on the
+// llvmpipe CPU device; then compiles a compute shader, which lavapipe JIT-compiles with LLVM, runs
 // it over 256 invocations and checks every result: the driver loads, compiles and executes.
 #define VK_NO_PROTOTYPES
 #include <math.h>
@@ -19,6 +19,25 @@
 #include "probe.spv.h"
 
 #define N 256
+#ifdef _WIN32
+static int require_packaged_module(HMODULE module, const char *name) {
+  char actual[32768], expected[32768];
+  DWORD n = GetModuleFileNameA(NULL, expected, sizeof(expected));
+  if (!module || n == 0 || n >= sizeof(expected)) return 0;
+  char *base = strrchr(expected, '\\');
+  if (!base || (size_t)(base + 1 - expected) + strlen(name) >= sizeof(expected)) return 0;
+  strcpy(base + 1, name);
+  n = GetModuleFileNameA(module, actual, sizeof(actual));
+  if (n == 0 || n >= sizeof(actual)) return 0;
+  if (_stricmp(actual, expected) != 0) {
+    fprintf(stderr, "loaded %s from %s, expected %s\n", name, actual, expected);
+    return 0;
+  }
+  printf("loaded: %s\n", actual);
+  return 1;
+}
+#endif
+
 #define CHECK(call)                                                                            \
   do {                                                                                         \
     VkResult r_ = (call);                                                                      \
@@ -36,6 +55,7 @@ static PFN_vkGetInstanceProcAddr load_vulkan(void) {
     fprintf(stderr, "LoadLibrary %s failed: %lu\n", LIBNAME, GetLastError());
     return NULL;
   }
+  if (!require_packaged_module(lib, LIBNAME)) return NULL;
   return (PFN_vkGetInstanceProcAddr)GetProcAddress(lib, "vkGetInstanceProcAddr");
 #else
   void *lib = dlopen(LIBNAME, RTLD_NOW | RTLD_LOCAL);
@@ -113,13 +133,28 @@ int main(void) {
     fprintf(stderr, "no physical devices (%d)\n", r);
     return 1;
   }
+  uint32_t selected = UINT32_MAX;
   for (uint32_t i = 0; i < n; i++) {
     VkPhysicalDeviceProperties p;
     vkGetPhysicalDeviceProperties(pd[i], &p);
     printf("device %u: %s, type %d, Vulkan %u.%u.%u\n", i, p.deviceName, p.deviceType,
            VK_API_VERSION_MAJOR(p.apiVersion), VK_API_VERSION_MINOR(p.apiVersion),
            VK_API_VERSION_PATCH(p.apiVersion));
+    if (p.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU && strstr(p.deviceName, "llvmpipe")) {
+      if (selected != UINT32_MAX) {
+        fprintf(stderr, "multiple llvmpipe devices; cannot identify the packaged driver\n");
+        return 1;
+      }
+      selected = i;
+    }
   }
+  if (selected == UINT32_MAX) {
+    fprintf(stderr, "no llvmpipe CPU device\n");
+    return 1;
+  }
+#ifdef _WIN32
+  if (!require_packaged_module(GetModuleHandleA("vulkan_lvp.dll"), "vulkan_lvp.dll")) return 1;
+#endif
 
   float priority = 1.0f;
   VkDeviceQueueCreateInfo q = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -130,7 +165,7 @@ int main(void) {
                             .queueCreateInfoCount = 1,
                             .pQueueCreateInfos = &q};
   VkDevice dev;
-  CHECK(vkCreateDevice(pd[0], &dci, NULL, &dev));
+  CHECK(vkCreateDevice(pd[selected], &dci, NULL, &dev));
   VkQueue queue;
   vkGetDeviceQueue(dev, 0, 0, &queue);
 
@@ -145,7 +180,7 @@ int main(void) {
   VkMemoryRequirements req;
   vkGetBufferMemoryRequirements(dev, buf, &req);
   VkPhysicalDeviceMemoryProperties mp;
-  vkGetPhysicalDeviceMemoryProperties(pd[0], &mp);
+  vkGetPhysicalDeviceMemoryProperties(pd[selected], &mp);
   uint32_t type = UINT32_MAX;
   VkMemoryPropertyFlags want =
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;

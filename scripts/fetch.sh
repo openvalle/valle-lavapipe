@@ -1,7 +1,7 @@
 #!/bin/bash
 # Downloads the named inputs from sources.txt into sources/ and checks their sha256. A file
 # already there with the right hash is kept, so a rerun downloads nothing.
-#   scripts/fetch.sh mesa-25.2.7.tar.xz llvm-21.1.6.src.tar.xz ...
+#   scripts/fetch.sh mesa-26.2.6.tar.xz llvm-project-23.1.5.src.tar.xz ...
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p sources

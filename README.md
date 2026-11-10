@@ -1,6 +1,6 @@
 # valle-lavapipe
 
-Prebuilt [Mesa](https://www.mesa3d.org/) lavapipe packages for Linux and Windows, x86_64.
+Prebuilt [Mesa](https://www.mesa3d.org/) lavapipe packages for Linux and Windows, on x86_64 and ARM64.
 
 Lavapipe is Mesa's CPU Vulkan driver, built on llvmpipe and LLVM's JIT. It gives machines
 without a GPU, such as CI runners and headless servers, a working Vulkan device. Valle uses it
@@ -8,23 +8,37 @@ for CPU rendering through wgpu.
 
 ## Packages
 
-Each [release](https://github.com/openvalle/valle-lavapipe/releases) contains two packages with
-checksums (Mesa 25.2.7, LLVM 21.1.6, Vulkan loader 1.4.328, Vulkan API 1.4.318):
+Packages use Mesa 26.2.6 (Vulkan API 1.4.354):
 
-**valle-lavapipe-{version}-linux-x86_64.tar.gz**  
+| Platform | LLVM | Vulkan loader |
+|---|---|---|
+| Linux x86_64 | 23.1.5 | 1.4.368 |
+| Linux aarch64 | 23.1.5 | 1.4.368 |
+| Windows x86_64 | 23.1.5 | 1.4.368 |
+| Windows aarch64 | 23.1.5 | 1.4.368 |
+
+**valle-lavapipe-{version}-linux-x86_64.tar.gz**
+
+**valle-lavapipe-{version}-linux-aarch64.tar.gz**
+
 Built from source in manylinux_2_28, requires only glibc 2.28+. LLVM, libdrm and the C++ runtime
 are statically linked.
 
-**valle-lavapipe-{version}-windows-x86_64.tar.gz**  
-Lavapipe from [mesa-dist-win](https://github.com/pal1000/mesa-dist-win), Vulkan loader from
-LunarG's runtime, repackaged.
+**valle-lavapipe-{version}-windows-x86_64.zip**
 
-Both have the same layout:
+**valle-lavapipe-{version}-windows-aarch64.zip**
+
+Built from source with MSVC on native x64 and ARM64 Windows runners. LLVM and the MSVC runtime
+are statically linked; no separate Visual C++ runtime installation is required.
+Targets Windows 10+ on x64 and Windows 11 on ARM64. Only Lavapipe and Vulkan Loader are packaged;
+D3D12, OpenGL, video codecs, zlib and zstd are disabled.
+
+The packages share this layout:
 ```
 lib/
   libvulkan.so.1 / vulkan-1.dll           Vulkan loader
   libvulkan_lvp.so / vulkan_lvp.dll       lavapipe
-  lvp_icd.x86_64.json                     driver manifest
+  lvp_icd.x86_64.json / lvp_icd.aarch64.json  driver manifest
 licenses/
 THIRD_PARTY.md
 ```
@@ -38,12 +52,14 @@ extracting:
 # Linux
 export LD_LIBRARY_PATH=/path/to/valle-lavapipe/lib
 export VK_DRIVER_FILES=/path/to/valle-lavapipe/lib/lvp_icd.x86_64.json
+# On Linux ARM64, use lvp_icd.aarch64.json instead.
 ```
 
 ```powershell
 # Windows
 $env:PATH = "C:\path\to\valle-lavapipe\lib;$env:PATH"
 $env:VK_DRIVER_FILES = "C:\path\to\valle-lavapipe\lib\lvp_icd.x86_64.json"
+# On Windows ARM64, use lvp_icd.aarch64.json instead.
 ```
 
 For wgpu, also set `WGPU_BACKEND=vulkan` and `WGPU_ADAPTER_NAME=llvmpipe`.
@@ -59,10 +75,25 @@ reg add HKLM\SOFTWARE\Khronos\Vulkan\Drivers /v "C:\path\to\valle-lavapipe\lib\l
 ## Development
 
 CI downloads inputs from [sources.txt](sources.txt), verifies checksums, then builds and tests
-both packages. Linux: built in manylinux_2_28 ([build-linux.sh](scripts/build-linux.sh)), tested
-with a compute probe on bare distributions. Windows: repackaged
-([package-windows.sh](scripts/package-windows.sh)), tested by compiling and running the same
-probe.
+all four release packages. Linux: built in manylinux_2_28 ([build-linux.sh](scripts/build-linux.sh))
+on native `ubuntu-24.04` and `ubuntu-24.04-arm` runners. Each architecture runs the compute
+probe on AlmaLinux 8, Ubuntu 22.04, Debian 12 and Ubuntu 24.04. Windows: LLVM, Lavapipe and Vulkan Loader
+are built from source ([build-windows.ps1](scripts/build-windows.ps1)) on `windows-2025-vs2026`
+and `windows-11-arm`. Both native architectures run the same compute probe against the
+extracted archive ([run-windows.ps1](tests/run-windows.ps1)). The probe checks the DLL paths,
+requires an llvmpipe CPU device, and verifies 256 compute results. A second run must fail with
+the packaged driver removed. Any temporary registry registration is restored afterwards.
+
+To build on a matching Windows host with Visual Studio C++ tools, Windows SDK and Python 3:
+
+```powershell
+./scripts/build-windows.ps1 -Architecture x64 -Version 26.2.6-local -Jobs 3
+./tests/run-windows.ps1 -Package dist/valle-lavapipe-26.2.6-local-windows-x86_64.zip
+# On native Windows ARM64, use -Architecture arm64 and windows-aarch64.zip.
+```
+
+The Windows script downloads and verifies its source inputs, installs pinned Python build
+tools into a build-local virtual environment, and writes both the archive and its SHA-256.
 
 Publishing a release runs [release.yml](.github/workflows/release.yml) and uploads the packages.
 Running the workflow manually with `publish` unset builds and tests without uploading.
