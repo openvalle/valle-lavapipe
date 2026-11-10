@@ -95,6 +95,12 @@ To build on a matching Windows host with Visual Studio C++ tools, Windows SDK an
 The Windows script downloads and verifies its source inputs, installs pinned Python build
 tools into a build-local virtual environment, and writes both the archive and its SHA-256.
 
+CI caches only completed LLVM installations, separately for each OS and architecture.
+Cache keys include the source pins, platform build script and build environment (the pinned
+manylinux image or Windows runner image version). A changed key rebuilds LLVM; a matching
+cache skips its compilation. Later build or test failures do not discard a completed LLVM
+cache. Mesa, Vulkan Loader, packaging and runtime tests still run every time.
+
 Publishing a release runs [release.yml](.github/workflows/release.yml) and uploads the packages.
 Running the workflow manually with `publish` unset builds and tests without uploading.
 Set `platform` to `windows` or `linux` to test only that platform's two architectures;

@@ -15,6 +15,9 @@ JOBS=${JOBS:-$(nproc)}
 SRC=/work/sources
 B=/build
 PREFIX=$B/prefix
+LLVM_PREFIX=/work/build/llvm-cache/$BUILD_ARCH
+LLVM_CACHE_KEY=${LLVM_CACHE_KEY:-}
+LLVM_STAMP=$LLVM_PREFIX/.complete
 NAME=valle-lavapipe-$VERSION-linux-$BUILD_ARCH
 mkdir -p "$B" "$PREFIX" /work/dist
 cd "$B"
@@ -25,27 +28,41 @@ dnf install -y bison flex
 "$B/venv/bin/pip" install --quiet meson==1.12.1 ninja==1.13.2 cmake==4.4.4 mako==1.4.3 pyyaml==6.0.3 packaging==26.3
 export PATH="$B/venv/bin:$PATH"
 
-echo "=== Building LLVM 23.1.5 (static, $LLVM_TARGET only)"
 mkdir -p llvm-src
 # LLVM 23 also needs libc's common utilities while configuring LLVM itself.
 tar xJf "$SRC/llvm-project-23.1.5.src.tar.xz" -C llvm-src --strip-components=1 \
   llvm-project-23.1.5.src/llvm llvm-project-23.1.5.src/cmake \
   llvm-project-23.1.5.src/third-party llvm-project-23.1.5.src/libc
-cmake -G Ninja -S llvm-src/llvm -B llvm-build \
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-  -DLLVM_TARGETS_TO_BUILD="$LLVM_TARGET" -DLLVM_ENABLE_PROJECTS= \
-  -DLLVM_BUILD_TOOLS=OFF -DLLVM_INCLUDE_TOOLS=ON -DLLVM_BUILD_UTILS=OFF \
-  -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF \
-  -DLLVM_INCLUDE_DOCS=OFF -DLLVM_ENABLE_BINDINGS=OFF \
-  -DLLVM_ENABLE_ZLIB=OFF -DLLVM_ENABLE_ZSTD=OFF -DLLVM_ENABLE_LIBXML2=OFF \
-  -DLLVM_ENABLE_LIBEDIT=OFF -DLLVM_ENABLE_LIBPFM=OFF -DLLVM_ENABLE_FFI=OFF \
-  -DLLVM_ENABLE_TERMINFO=OFF -DLLVM_ENABLE_CURL=OFF -DLLVM_ENABLE_HTTPLIB=OFF \
-  -DLLVM_BUILD_LLVM_DYLIB=OFF -DLLVM_LINK_LLVM_DYLIB=OFF -DLLVM_ENABLE_PIC=ON \
-  -DLLVM_ENABLE_ASSERTIONS=OFF
-ninja -C llvm-build -j"$JOBS" install llvm-config
-# Without LLVM's tools, its install makes no bin/.
-mkdir -p "$PREFIX/bin"
-cp llvm-build/bin/llvm-config "$PREFIX/bin/"
+if [ -n "$LLVM_CACHE_KEY" ] && [ -f "$LLVM_STAMP" ] && \
+   [ "$(cat "$LLVM_STAMP")" = "$LLVM_CACHE_KEY" ] && \
+   [ -x "$LLVM_PREFIX/bin/llvm-config" ] && \
+   [ -f "$LLVM_PREFIX/lib/cmake/llvm/LLVMConfig.cmake" ] && \
+   [ "$("$LLVM_PREFIX/bin/llvm-config" --version)" = 23.1.5 ] && \
+   [ "$("$LLVM_PREFIX/bin/llvm-config" --targets-built)" = "$LLVM_TARGET" ]; then
+  echo "=== Reusing cached LLVM 23.1.5 ($LLVM_TARGET)"
+else
+  echo "=== Building LLVM 23.1.5 (static, $LLVM_TARGET only)"
+  # A missing/mismatched stamp must never reuse partial installs or old objects.
+  rm -rf "$LLVM_PREFIX" llvm-build
+  cmake -G Ninja -S llvm-src/llvm -B llvm-build \
+    -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$LLVM_PREFIX" \
+    -DLLVM_TARGETS_TO_BUILD="$LLVM_TARGET" -DLLVM_ENABLE_PROJECTS= \
+    -DLLVM_BUILD_TOOLS=OFF -DLLVM_INCLUDE_TOOLS=ON -DLLVM_BUILD_UTILS=OFF \
+    -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF \
+    -DLLVM_INCLUDE_DOCS=OFF -DLLVM_ENABLE_BINDINGS=OFF \
+    -DLLVM_ENABLE_ZLIB=OFF -DLLVM_ENABLE_ZSTD=OFF -DLLVM_ENABLE_LIBXML2=OFF \
+    -DLLVM_ENABLE_LIBEDIT=OFF -DLLVM_ENABLE_LIBPFM=OFF -DLLVM_ENABLE_FFI=OFF \
+    -DLLVM_ENABLE_TERMINFO=OFF -DLLVM_ENABLE_CURL=OFF -DLLVM_ENABLE_HTTPLIB=OFF \
+    -DLLVM_BUILD_LLVM_DYLIB=OFF -DLLVM_LINK_LLVM_DYLIB=OFF -DLLVM_ENABLE_PIC=ON \
+    -DLLVM_ENABLE_ASSERTIONS=OFF
+  ninja -C llvm-build -j"$JOBS" install llvm-config
+  # Without LLVM's tools, its install makes no bin/.
+  mkdir -p "$LLVM_PREFIX/bin"
+  cp llvm-build/bin/llvm-config "$LLVM_PREFIX/bin/"
+  [ "$("$LLVM_PREFIX/bin/llvm-config" --version)" = 23.1.5 ]
+  [ "$("$LLVM_PREFIX/bin/llvm-config" --targets-built)" = "$LLVM_TARGET" ]
+  if [ -n "$LLVM_CACHE_KEY" ]; then printf '%s\n' "$LLVM_CACHE_KEY" > "$LLVM_STAMP"; fi
+fi
 
 echo "=== Building glslang 16.6.0 (build tool)"
 # glslangValidator, which Mesa's Vulkan runtime compiles its GLSL with; a build tool only. Its
@@ -79,7 +96,7 @@ echo "=== Building Mesa 26.2.6 (lavapipe only)"
 rpm -e --nodeps libdrm-devel 2>/dev/null || true
 tar xJf "$SRC/mesa-26.2.6.tar.xz"
 printf '{\n  global: vk_icd*;\n  local: *;\n};\n' > "$B/lvp.map"
-printf '[binaries]\nllvm-config = %s\n' "'$PREFIX/bin/llvm-config'" > native.ini
+printf '[binaries]\nllvm-config = %s\n' "'$LLVM_PREFIX/bin/llvm-config'" > native.ini
 meson setup mesa-build mesa-26.2.6 --native-file native.ini \
   --prefix=/usr --libdir=lib --buildtype=release -Db_ndebug=true \
   -Dvulkan-drivers=swrast -Dgallium-drivers= -Dplatforms= \

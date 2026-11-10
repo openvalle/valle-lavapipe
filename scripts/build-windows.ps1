@@ -109,24 +109,40 @@ Invoke-Checked cmake.exe @('-G', 'Ninja', '-S', "$Source/glslang-16.6.0", '-B', 
 Invoke-Checked cmake.exe @('--build', "$Build/glslang-build", '--parallel', "$Jobs", '--target', 'install')
 
 $Prefix = "$Build/prefix"
-Write-Host "=== Building LLVM 23.1.5 ($LlvmTarget, static MSVC runtime)"
-Invoke-Checked cmake.exe (@('-G', 'Ninja', '-S', "$Source/llvm-project-23.1.5.src/llvm", '-B', "$Build/llvm-build",
-    "-DCMAKE_INSTALL_PREFIX=$Prefix", "-DLLVM_HOST_TRIPLE=$Cpu-pc-windows-msvc", "-DLLVM_TARGETS_TO_BUILD=$LlvmTarget") + $LlvmOptions)
-Invoke-Checked cmake.exe @('--build', "$Build/llvm-build", '--parallel', "$Jobs", '--target', 'install', 'llvm-config')
-New-Item -ItemType Directory -Force "$Prefix/bin" | Out-Null
-Copy-Item "$Build/llvm-build/bin/llvm-config.exe" "$Prefix/bin/llvm-config.exe"
-$LlvmConfig = "$Prefix/bin/llvm-config.exe".Replace('\', '/')
+$LlvmPrefix = "$Build/llvm-install"
+$LlvmConfig = "$LlvmPrefix/bin/llvm-config.exe".Replace('\', '/')
+$LlvmStamp = "$LlvmPrefix/.complete"
+$ReuseLlvm = $env:LLVM_CACHE_KEY -and (Test-Path $LlvmStamp) -and
+    ((Get-Content $LlvmStamp -Raw).Trim() -eq $env:LLVM_CACHE_KEY) -and
+    (Test-Path $LlvmConfig) -and (Test-Path "$LlvmPrefix/lib/cmake/llvm/LLVMConfig.cmake")
+if ($ReuseLlvm) {
+    Write-Host "=== Reusing cached LLVM 23.1.5 ($LlvmTarget)"
+} else {
+    Write-Host "=== Building LLVM 23.1.5 ($LlvmTarget, static MSVC runtime)"
+    # Discard partial installs and objects from any other cache configuration.
+    foreach ($Path in @($LlvmPrefix, "$Build/llvm-build")) {
+        if (Test-Path $Path) { Remove-Item $Path -Recurse -Force }
+    }
+    Invoke-Checked cmake.exe (@('-G', 'Ninja', '-S', "$Source/llvm-project-23.1.5.src/llvm", '-B', "$Build/llvm-build",
+        "-DCMAKE_INSTALL_PREFIX=$LlvmPrefix", "-DLLVM_HOST_TRIPLE=$Cpu-pc-windows-msvc", "-DLLVM_TARGETS_TO_BUILD=$LlvmTarget") + $LlvmOptions)
+    Invoke-Checked cmake.exe @('--build', "$Build/llvm-build", '--parallel', "$Jobs", '--target', 'install', 'llvm-config')
+    New-Item -ItemType Directory -Force "$LlvmPrefix/bin" | Out-Null
+    Copy-Item "$Build/llvm-build/bin/llvm-config.exe" "$LlvmPrefix/bin/llvm-config.exe"
+}
 $NativeFile = "$Build/native.ini"
 "[binaries]`nllvm-config = '$LlvmConfig'" | Set-Content $NativeFile -Encoding utf8
 $LlvmVersion = & $LlvmConfig --version
 if ($LASTEXITCODE -ne 0 -or $LlvmVersion.Trim() -ne '23.1.5') { throw 'Unexpected LLVM version.' }
+$LlvmBuiltTargets = & $LlvmConfig --targets-built
+if ($LASTEXITCODE -ne 0 -or $LlvmBuiltTargets.Trim() -ne $LlvmTarget) { throw 'Unexpected LLVM target.' }
+if ($env:LLVM_CACHE_KEY) { $env:LLVM_CACHE_KEY | Set-Content $LlvmStamp -Encoding ascii }
 
 Write-Host '=== Building Mesa 26.2.6 (Lavapipe only)'
 # Release builds remove assertions, leaving assertion-only locals unused. Mesa's
 # MSVC flags promote C4189 to an error; override just this warning for C and C++.
 $MesonReconfigure = if (Test-Path "$Build/mesa-build/meson-private/coredata.dat") { @('--reconfigure') } else { @() }
 Invoke-Checked meson.exe (@('setup', "$Build/mesa-build", "$Source/mesa-26.2.6",
-    '--native-file', $NativeFile, "--prefix=$Build/mesa-install", "--cmake-prefix-path=$Prefix", '--buildtype=release', '--default-library=static',
+    '--native-file', $NativeFile, "--prefix=$Build/mesa-install", "--cmake-prefix-path=$LlvmPrefix", '--buildtype=release', '--default-library=static',
     '--wrap-mode=nodownload', '--force-fallback-for=directx-headers,DirectX-Headers',
     '-Db_ndebug=true', '-Db_vscrt=mt', '-Dvulkan-drivers=swrast', '-Dgallium-drivers=', '-Dplatforms=windows',
     '-Dc_args=/wd4189', '-Dcpp_args=/wd4189',

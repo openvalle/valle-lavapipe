@@ -49,18 +49,37 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
+      - name: Select LLVM cache
+        id: llvm-key
+        run: echo "key=llvm-v1-linux-${{ matrix.arch }}-${{ hashFiles('sources.txt', 'scripts/build-linux.sh') }}-${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+      - name: Restore LLVM
+        id: llvm-cache
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/llvm-cache/${{ matrix.arch }}
+          key: ${{ steps.llvm-key.outputs.key }}
       - name: Download and verify sources
         run: >
           scripts/fetch.sh mesa-26.2.6.tar.xz llvm-project-23.1.5.src.tar.xz libdrm-2.4.134.tar.xz Vulkan-Loader-1.4.368.tar.gz
           Vulkan-Headers-1.4.368.tar.gz glslang-16.6.0.tar.gz
       # glibc 2.28: the package runs on that and anything newer.
       - name: Build in manylinux_2_28
+        env:
+          LLVM_CACHE_KEY: ${{ steps.llvm-key.outputs.key }}
         run: |
           test "$(uname -m)" = '${{ matrix.arch }}'
-          docker run --rm --platform '${{ matrix.platform }}' -e VERSION="${RELEASE_TAG#v}" -v "$PWD:/work" \
+          docker run --rm --platform '${{ matrix.platform }}' -e VERSION="${RELEASE_TAG#v}" -e LLVM_CACHE_KEY -v "$PWD:/work" \
             '${{ matrix.image }}' \
             /work/scripts/build-linux.sh
           sudo chown -R "$(id -u):$(id -g)" dist
+      - name: Save completed LLVM even if later builds failed
+        if: ${{ !cancelled() && steps.llvm-cache.outputs.cache-hit != 'true' && hashFiles(format('build/llvm-cache/{0}/.complete', matrix.arch)) != '' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/llvm-cache/${{ matrix.arch }}
+          key: ${{ steps.llvm-key.outputs.key }}
       - name: Run the probe on bare distributions
         run: |
           name="valle-lavapipe-${RELEASE_TAG#v}-linux-${{ matrix.arch }}"
@@ -94,8 +113,23 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
+      - name: Select LLVM cache
+        id: llvm-key
+        shell: pwsh
+        run: |
+          if (!$env:ImageVersion) { throw 'Runner image version is required for the LLVM cache key.' }
+          "key=llvm-v1-${{ matrix.runner }}-${{ matrix.arch }}-$($env:ImageVersion)-${{ hashFiles('sources.txt', 'scripts/build-windows.ps1') }}" >> $env:GITHUB_OUTPUT
+      - name: Restore LLVM
+        id: llvm-cache
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/windows-msvc/${{ matrix.arch }}/llvm-install
+          key: ${{ steps.llvm-key.outputs.key }}
       - name: Build LLVM, Lavapipe and Vulkan Loader from source
         shell: pwsh
+        env:
+          LLVM_CACHE_KEY: ${{ steps.llvm-key.outputs.key }}
         run: |
           New-Item -ItemType Directory -Force build | Out-Null
           Start-Transcript -Path "build/windows-${{ matrix.cpu }}.log"
@@ -104,6 +138,13 @@ jobs:
           } finally {
             Stop-Transcript
           }
+      - name: Save completed LLVM even if later builds failed
+        if: ${{ !cancelled() && steps.llvm-cache.outputs.cache-hit != 'true' && hashFiles(format('build/windows-msvc/{0}/llvm-install/.complete', matrix.arch)) != '' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/windows-msvc/${{ matrix.arch }}/llvm-install
+          key: ${{ steps.llvm-key.outputs.key }}
       - name: Run the probe with the package
         shell: pwsh
         run: |
