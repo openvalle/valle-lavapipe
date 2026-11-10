@@ -18,6 +18,7 @@ GLX and hardware GPU drivers.
 | [LLVM](https://llvm.org/) | 23.1.5 | Apache-2.0 WITH LLVM-exception | Built from source and statically linked into lavapipe, with only the matching CPU backend. |
 | [Vulkan-Loader](https://github.com/KhronosGroup/Vulkan-Loader) | 1.4.368 | Apache-2.0 | Built from source on Linux and Windows. |
 | [libdrm](https://gitlab.freedesktop.org/mesa/drm) | 2.4.134 | MIT | Linux: statically linked into lavapipe, which Mesa requires for any Vulkan driver. |
+| [DirectX-Headers](https://github.com/microsoft/DirectX-Headers) | 1.619.1 | MIT | Windows: headers and static helpers used by Mesa's window-system support. The D3D12 Gallium driver is disabled. |
 | [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) | 1.4.368 | Apache-2.0 | Build input only. |
 | [glslang](https://github.com/KhronosGroup/glslang) | 16.6.0 | BSD-3-Clause and others | Build tool only, for Mesa's internal shaders and the test probe. |
 

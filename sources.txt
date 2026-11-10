@@ -8,3 +8,6 @@ ac5e74d157830eb8bee44c6a6bf3ad49774ef0dd2a72bdad74a8f20308b52a95  libdrm-2.4.134
 d2fe102c8493d80f2e3d6c5b3304a331e69072d7a041b1323c6f0246b94cbf3c  Vulkan-Loader-1.4.368.tar.gz  https://github.com/KhronosGroup/Vulkan-Loader/archive/refs/tags/v1.4.368.tar.gz
 5c5c6f64fcce28a24cc934143a048707af036a858e4ed11d7f71fe016006ecda  Vulkan-Headers-1.4.368.tar.gz  https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.368.tar.gz
 9c09b901149c729df745057dafa815278aaa101b84d2b6e14f16a42de52f97f2  glslang-16.6.0.tar.gz  https://github.com/KhronosGroup/glslang/archive/refs/tags/16.6.0.tar.gz
+
+# Windows: Mesa's window-system support uses the headers and static helper libraries.
+6193774904c940eebb9b0c51b816b93dd776cfeb25a951f0f4a58f22387e5008  DirectX-Headers-1.619.1.tar.gz  https://github.com/microsoft/DirectX-Headers/archive/refs/tags/v1.619.1.tar.gz

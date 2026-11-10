@@ -29,7 +29,7 @@ function Invoke-Checked([string]$Program, [string[]]$Arguments) {
     if ($LASTEXITCODE -ne 0) { throw "$Program failed with exit code $LASTEXITCODE" }
 }
 
-function Expand-Source([string]$File, [string]$Directory, [string[]]$Members = @()) {
+function Expand-Source([string]$File, [string]$Directory, [string[]]$Members = @(), [string]$Destination = $Source) {
     $Line = @(Get-Content "$Root/sources.txt" | Where-Object { $_ -match ('^[0-9a-f]{64}  ' + [regex]::Escape($File) + '  ') })
     if ($Line.Count -ne 1) { throw "Missing or duplicate source pin: $File" }
     $Hash, $Ignored, $Url = $Line[0] -split '\s+', 3
@@ -40,9 +40,9 @@ function Expand-Source([string]$File, [string]$Directory, [string[]]$Members = @
         Move-Item "$Archive.part" $Archive
     }
     if ((Get-FileHash $Archive -Algorithm SHA256).Hash -ne $Hash) { throw "SHA-256 mismatch: $File" }
-    if (!(Test-Path "$Source/$Directory/.extracted")) {
-        Invoke-Checked tar.exe (@('-xf', $Archive, '-C', $Source) + $Members)
-        New-Item -ItemType File -Force "$Source/$Directory/.extracted" | Out-Null
+    if (!(Test-Path "$Destination/$Directory/.extracted")) {
+        Invoke-Checked tar.exe (@('-xf', $Archive, '-C', $Destination) + $Members)
+        New-Item -ItemType File -Force "$Destination/$Directory/.extracted" | Out-Null
     }
 }
 
@@ -73,6 +73,18 @@ Expand-Source 'mesa-26.2.6.tar.xz' 'mesa-26.2.6'
 Expand-Source 'glslang-16.6.0.tar.gz' 'glslang-16.6.0'
 Expand-Source 'Vulkan-Headers-1.4.368.tar.gz' 'Vulkan-Headers-1.4.368'
 Expand-Source 'Vulkan-Loader-1.4.368.tar.gz' 'Vulkan-Loader-1.4.368'
+# Use the verified archive instead of Mesa's implicit git download.
+Expand-Source 'DirectX-Headers-1.619.1.tar.gz' 'DirectX-Headers-1.619.1' -Destination "$Source/mesa-26.2.6/subprojects"
+$DxWrap = "$Source/mesa-26.2.6/subprojects/DirectX-Headers.wrap"
+(Get-Content $DxWrap -Raw).Replace('directory = DirectX-Headers-1.0', 'directory = DirectX-Headers-1.619.1') |
+    Set-Content $DxWrap -Encoding utf8
+if ($Architecture -eq 'arm64') {
+    # Loader 1.4.368 passes C preprocessor directives straight to armasm64 under
+    # Ninja. Preprocess them for native ARM64, retaining the assembly trampolines.
+    $LoaderAsm = "$Source/Vulkan-Loader-1.4.368/loader/unknown_ext_chain_marmasm.asm"
+    Invoke-Checked cl.exe @('/nologo', '/TC', '/P', '/EP', "/Fi$Build/unknown_ext_chain_marmasm.asm", $LoaderAsm)
+    Copy-Item "$Build/unknown_ext_chain_marmasm.asm" $LoaderAsm -Force
+}
 if (!(Test-Path "$Build/venv/Scripts/python.exe")) { Invoke-Checked python.exe @('-m', 'venv', "$Build/venv") }
 $Python = "$Build/venv/Scripts/python.exe"
 Invoke-Checked $Python @('-m', 'pip', 'install', 'meson==1.12.1', 'ninja==1.13.2', 'cmake==4.4.4', 'mako==1.4.3', 'pyyaml==6.0.3', 'packaging==26.3')
@@ -115,6 +127,7 @@ Write-Host '=== Building Mesa 26.2.6 (Lavapipe only)'
 $MesonReconfigure = if (Test-Path "$Build/mesa-build/meson-private/coredata.dat") { @('--reconfigure') } else { @() }
 Invoke-Checked meson.exe (@('setup', "$Build/mesa-build", "$Source/mesa-26.2.6",
     '--native-file', $NativeFile, "--prefix=$Build/mesa-install", "--cmake-prefix-path=$Prefix", '--buildtype=release', '--default-library=static',
+    '--wrap-mode=nodownload', '--force-fallback-for=directx-headers,DirectX-Headers',
     '-Db_ndebug=true', '-Db_vscrt=mt', '-Dvulkan-drivers=swrast', '-Dgallium-drivers=', '-Dplatforms=windows',
     '-Dc_args=/wd4189', '-Dcpp_args=/wd4189',
     '-Dopengl=false', '-Dgles1=disabled', '-Dgles2=disabled', '-Dglvnd=disabled',
@@ -147,20 +160,26 @@ Copy-Item "$Source/mesa-26.2.6/licenses/MIT" "$Package/licenses/mesa-MIT.txt"
 Copy-Item "$Source/mesa-26.2.6/licenses/BSL-1.0" "$Package/licenses/mesa-BSL-1.0.txt"
 Copy-Item "$Source/llvm-project-23.1.5.src/llvm/LICENSE.TXT" "$Package/licenses/llvm.txt"
 Copy-Item "$Source/Vulkan-Loader-1.4.368/LICENSE.txt" "$Package/licenses/vulkan-loader.txt"
+Copy-Item "$Source/mesa-26.2.6/subprojects/DirectX-Headers-1.619.1/LICENSE" "$Package/licenses/directx-headers.txt"
 Copy-Item "$Root/THIRD_PARTY.md" "$Package/"
+$UnexpectedDependencies = @()
 foreach ($Dll in Get-ChildItem "$Package/lib/*.dll") {
     $Headers = & dumpbin.exe /headers $Dll.FullName
     if ($LASTEXITCODE -ne 0 -or !($Headers -match "machine \($Architecture\)")) { throw "Wrong PE architecture: $($Dll.Name)" }
     $Imports = & dumpbin.exe /dependents $Dll.FullName
     if ($LASTEXITCODE -ne 0) { throw "Cannot inspect $($Dll.Name)" }
     $Imports | Set-Content "$Build/$($Dll.Name).imports.txt"
+    $Imports | Write-Host
     # /MT must keep compiler runtimes and optional third-party DLLs out of the package's imports.
-    $Allowed = '^(KERNEL32|NTDLL|ADVAPI32|USER32|GDI32|SHELL32|OLE32|OLEAUT32|WS2_32|VERSION|SHLWAPI|BCRYPT|CFGMR32|DEVOBJ|SETUPAPI|PSAPI|DBGHELP|RPCRT4|ucrtbase|api-ms-win-.+|ext-ms-win-.+)\.dll$'
+    $Allowed = '^(KERNEL32|NTDLL|ADVAPI32|USER32|GDI32|SHELL32|OLE32|OLEAUT32|WS2_32|VERSION|SHLWAPI|BCRYPT|CFGMGR32|DEVOBJ|SETUPAPI|PSAPI|DBGHELP|RPCRT4|ucrtbase|api-ms-win-.+|ext-ms-win-.+)\.dll$'
     foreach ($Line in $Imports) {
         $Dependency = $Line.Trim()
-        if ($Dependency -match '^[\w.-]+\.dll$' -and $Dependency -notmatch $Allowed) { throw "Unexpected dependency in $($Dll.Name): $Dependency" }
+        if ($Dependency -match '^[\w.-]+\.dll$' -and $Dependency -notmatch $Allowed) {
+            $UnexpectedDependencies += "$($Dll.Name): $Dependency"
+        }
     }
 }
+if ($UnexpectedDependencies.Count) { throw "Unexpected DLL dependencies: $($UnexpectedDependencies -join '; ')" }
 $Exports = & dumpbin.exe /exports "$Package/lib/vulkan_lvp.dll"
 if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect Lavapipe exports.' }
 foreach ($Entry in @('vk_icdGetInstanceProcAddr', 'vk_icdGetPhysicalDeviceProcAddr', 'vk_icdNegotiateLoaderICDInterfaceVersion')) {

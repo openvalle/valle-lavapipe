@@ -31,7 +31,7 @@ are statically linked.
 Built from source with MSVC on native x64 and ARM64 Windows runners. LLVM and the MSVC runtime
 are statically linked; no separate Visual C++ runtime installation is required.
 Targets Windows 10+ on x64 and Windows 11 on ARM64. Only Lavapipe and Vulkan Loader are packaged;
-D3D12, OpenGL, video codecs, zlib and zstd are disabled.
+the D3D12 driver, OpenGL, video codecs, zlib and zstd are disabled.
 
 The packages share this layout:
 ```
@@ -103,5 +103,5 @@ the default `all` tests all four packages. Publishing always builds and tests al
 ## License
 
 Scripts: Apache-2.0 ([LICENSE](LICENSE)). Packages contain Mesa (MIT), LLVM (Apache-2.0 WITH
-LLVM-exception), Vulkan loader (Apache-2.0) and libdrm (MIT); see
-[THIRD_PARTY.md](THIRD_PARTY.md).
+LLVM-exception), Vulkan loader (Apache-2.0), libdrm (MIT, Linux) and DirectX-Headers
+(MIT, Windows); see [THIRD_PARTY.md](THIRD_PARTY.md).

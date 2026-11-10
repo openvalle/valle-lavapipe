@@ -35,7 +35,11 @@ try {
     if ($Admin) {
         $CreatedKey = !(Test-Path $DriverKey)
         if ($CreatedKey) { New-Item -Path $DriverKey -Force | Out-Null }
-        $PreviousValue = Get-ItemPropertyValue -Path $DriverKey -Name $Manifest -ErrorAction SilentlyContinue
+        # A fresh extraction has no registered value. Get-ItemPropertyValue throws
+        # for missing names even with SilentlyContinue; RegistryKey.GetValue returns null.
+        $RegistryKey = Get-Item -LiteralPath $DriverKey
+        try { $PreviousValue = $RegistryKey.GetValue($Manifest, $null) }
+        finally { $RegistryKey.Close() }
         New-ItemProperty -Path $DriverKey -Name $Manifest -PropertyType DWord -Value 0 -Force | Out-Null
         $Registered = $true
     }
@@ -57,8 +61,8 @@ try {
     if ($Registered) {
         if ($null -eq $PreviousValue) { Remove-ItemProperty -Path $DriverKey -Name $Manifest }
         else { Set-ItemProperty -Path $DriverKey -Name $Manifest -Value $PreviousValue }
-        if ($CreatedKey) { Remove-Item $DriverKey }
     }
+    if ($CreatedKey) { Remove-Item $DriverKey }
 }
 # The deliberately failing negative control must not become the workflow step's exit code.
 $global:LASTEXITCODE = 0

@@ -108,7 +108,12 @@ jobs:
         shell: pwsh
         run: |
           $version = $env:RELEASE_TAG.TrimStart('v')
-          ./tests/run-windows.ps1 -Package "dist/valle-lavapipe-$version-windows-${{ matrix.cpu }}.zip"
+          Start-Transcript -Path "build/windows-${{ matrix.cpu }}-probe.log"
+          try {
+            ./tests/run-windows.ps1 -Package "dist/valle-lavapipe-$version-windows-${{ matrix.cpu }}.zip"
+          } finally {
+            Stop-Transcript
+          }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-${{ matrix.cpu }}
@@ -121,6 +126,8 @@ jobs:
           name: windows-${{ matrix.cpu }}-logs
           path: |
             build/windows-*.log
+            build/windows-msvc/**/*.imports.txt
+            build/windows-msvc/**/unknown_ext_chain_marmasm.asm
             build/windows-msvc/**/meson-logs/meson-log.txt
             build/windows-msvc/**/CMakeFiles/CMakeConfigureLog.yaml
 
