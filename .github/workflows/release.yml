@@ -8,6 +8,12 @@ on:
         description: Existing release tag, such as v0.1.0
         type: string
         required: true
+      platform:
+        description: Platform to test (publishing always builds all)
+        type: choice
+        options: [all, linux, windows]
+        default: all
+        required: true
       publish:
         description: Upload the packages to the release after testing
         type: boolean
@@ -22,6 +28,7 @@ env:
   RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
 jobs:
   linux:
+    if: github.event_name == 'release' || inputs.publish || inputs.platform != 'windows'
     name: Linux ${{ matrix.arch }}
     strategy:
       fail-fast: false
@@ -68,6 +75,7 @@ jobs:
           if-no-files-found: error
 
   windows:
+    if: github.event_name == 'release' || inputs.publish || inputs.platform != 'linux'
     name: Windows ${{ matrix.cpu }} (MSVC)
     strategy:
       fail-fast: false

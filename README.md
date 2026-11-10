@@ -97,6 +97,8 @@ tools into a build-local virtual environment, and writes both the archive and it
 
 Publishing a release runs [release.yml](.github/workflows/release.yml) and uploads the packages.
 Running the workflow manually with `publish` unset builds and tests without uploading.
+Set `platform` to `windows` or `linux` to test only that platform's two architectures;
+the default `all` tests all four packages. Publishing always builds and tests all four.
 
 ## License
 

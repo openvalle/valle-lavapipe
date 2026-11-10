@@ -110,10 +110,13 @@ $LlvmVersion = & $LlvmConfig --version
 if ($LASTEXITCODE -ne 0 -or $LlvmVersion.Trim() -ne '23.1.5') { throw 'Unexpected LLVM version.' }
 
 Write-Host '=== Building Mesa 26.2.6 (Lavapipe only)'
+# Release builds remove assertions, leaving assertion-only locals unused. Mesa's
+# MSVC flags promote C4189 to an error; override just this warning for C and C++.
 $MesonReconfigure = if (Test-Path "$Build/mesa-build/meson-private/coredata.dat") { @('--reconfigure') } else { @() }
 Invoke-Checked meson.exe (@('setup', "$Build/mesa-build", "$Source/mesa-26.2.6",
     '--native-file', $NativeFile, "--prefix=$Build/mesa-install", "--cmake-prefix-path=$Prefix", '--buildtype=release', '--default-library=static',
     '-Db_ndebug=true', '-Db_vscrt=mt', '-Dvulkan-drivers=swrast', '-Dgallium-drivers=', '-Dplatforms=windows',
+    '-Dc_args=/wd4189', '-Dcpp_args=/wd4189',
     '-Dopengl=false', '-Dgles1=disabled', '-Dgles2=disabled', '-Dglvnd=disabled',
     '-Dglx=disabled', '-Degl=disabled', '-Dgbm=disabled', '-Dllvm=enabled', '-Dshared-llvm=disabled',
     '-Dcpp_rtti=false', '-Dshader-cache=disabled', '-Dzlib=disabled', '-Dzstd=disabled',
