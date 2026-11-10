@@ -53,8 +53,8 @@ if (!$VisualStudioPath) {
     if ($LASTEXITCODE -ne 0 -or !$VisualStudioPath) { throw 'Visual Studio was not found.' }
 }
 $VsDevCmd = Join-Path $VisualStudioPath 'Common7/Tools/VsDevCmd.bat'
-$Command = "`"$VsDevCmd`" -no_logo -host_arch=$HostArchitecture -arch=$Architecture && set"
-$Lines = & $env:ComSpec /d /s /c "`"$Command`""
+$Command = "call `"$VsDevCmd`" -no_logo -host_arch=$HostArchitecture -arch=$Architecture && set"
+$Lines = & $env:ComSpec /d /s /c $Command
 if ($LASTEXITCODE -ne 0) { throw "MSVC tools for $Architecture are unavailable." }
 foreach ($Line in $Lines) {
     if ($Line -match '^([^=]+)=(.*)$') { Set-Item "Env:$($Matches[1])" $Matches[2] }
