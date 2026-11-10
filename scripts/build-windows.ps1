@@ -113,7 +113,7 @@ Write-Host '=== Building Mesa 26.2.6 (Lavapipe only)'
 $MesonReconfigure = if (Test-Path "$Build/mesa-build/meson-private/coredata.dat") { @('--reconfigure') } else { @() }
 Invoke-Checked meson.exe (@('setup', "$Build/mesa-build", "$Source/mesa-26.2.6",
     '--native-file', $NativeFile, "--prefix=$Build/mesa-install", "--cmake-prefix-path=$Prefix", '--buildtype=release', '--default-library=static',
-    '-Db_ndebug=true', '-Db_vscrt=mt', '-Dvulkan-drivers=swrast', '-Dgallium-drivers=', '-Dplatforms=',
+    '-Db_ndebug=true', '-Db_vscrt=mt', '-Dvulkan-drivers=swrast', '-Dgallium-drivers=', '-Dplatforms=windows',
     '-Dopengl=false', '-Dgles1=disabled', '-Dgles2=disabled', '-Dglvnd=disabled',
     '-Dglx=disabled', '-Degl=disabled', '-Dgbm=disabled', '-Dllvm=enabled', '-Dshared-llvm=disabled',
     '-Dcpp_rtti=false', '-Dshader-cache=disabled', '-Dzlib=disabled', '-Dzstd=disabled',
