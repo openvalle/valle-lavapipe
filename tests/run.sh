@@ -1,6 +1,7 @@
 #!/bin/sh
 # Runs inside a bare distribution image with dist/ mounted at /dist: the probe with the
-# package, then without it, which must fail, so the package is what it found.
+# package, then calling its driver directly, as Valle does, then without it, which must fail,
+# so the package is what it found.
 #   tests/run.sh valle-lavapipe-0.1.0-linux-x86_64
 L=/dist/$1/lib
 BUILD_ARCH=$(uname -m)
@@ -10,7 +11,10 @@ echo "### $(. /etc/os-release && echo "$PRETTY_NAME")"
 echo "--- with the package"
 LD_LIBRARY_PATH="$L" VK_DRIVER_FILES="$L/lvp_icd.$BUILD_ARCH.json" "$PROBE"
 with=$?
+echo "--- its driver directly, without the loader"
+"$PROBE" --direct "$L/libvulkan_lvp.so"
+direct=$?
 echo "--- without it"
 "$PROBE"
 without=$?
-[ "$with" -eq 0 ] && [ "$without" -ne 0 ]
+[ "$with" -eq 0 ] && [ "$direct" -eq 0 ] && [ "$without" -ne 0 ]

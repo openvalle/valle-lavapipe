@@ -31,6 +31,13 @@ $CreatedKey = $false
 $PreviousPath = $env:PATH
 $PreviousDriverFiles = $env:VK_DRIVER_FILES
 try {
+    # Installed compiler/MSYS2 DLLs must not mask a missing runtime dependency.
+    $env:PATH = "$env:SystemRoot\System32"
+    # As Valle uses it: no loader, manifest, environment or registry, elevated or not.
+    Write-Host "=== Its driver directly, without the loader (elevated: $Admin)"
+    # LoadLibrary takes backslashes only.
+    & "$Lib/probe.exe" --direct ([IO.Path]::GetFullPath($Driver))
+    if ($LASTEXITCODE -ne 0) { throw 'Direct Vulkan compute probe failed.' }
     # Elevated loaders ignore VK_DRIVER_FILES; ordinary processes use the explicit path.
     if ($Admin) {
         $CreatedKey = !(Test-Path $DriverKey)
@@ -44,8 +51,6 @@ try {
         $Registered = $true
     }
     $env:VK_DRIVER_FILES = $Manifest
-    # Installed compiler/MSYS2 DLLs must not mask a missing runtime dependency.
-    $env:PATH = "$env:SystemRoot\System32"
     Write-Host '=== With the packaged loader and driver'
     & "$Lib/probe.exe"
     if ($LASTEXITCODE -ne 0) { throw 'Packaged Vulkan compute probe failed.' }
@@ -53,7 +58,7 @@ try {
     Move-Item $Driver "$Driver.disabled"
     & "$Lib/probe.exe"
     if ($LASTEXITCODE -eq 0) { throw 'Probe succeeded without the packaged driver.' }
-    Write-Host 'PASS: packaged driver computes correctly; removing it causes failure.'
+    Write-Host 'PASS: packaged driver computes correctly, directly too; removing it causes failure.'
 } finally {
     if (Test-Path "$Driver.disabled") { Move-Item "$Driver.disabled" $Driver }
     $env:PATH = $PreviousPath

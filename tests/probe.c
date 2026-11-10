@@ -1,6 +1,8 @@
 // Loads the Vulkan loader by name, as wgpu does; creates an instance and a device on the
 // llvmpipe CPU device; then compiles a compute shader, which lavapipe JIT-compiles with LLVM, runs
 // it over 256 invocations and checks every result: the driver loads, compiles and executes.
+// With --direct DRIVER, it loads the driver itself and calls it without any loader, as Valle
+// does: no environment, manifest or registry is read, so this works in elevated processes too.
 #define VK_NO_PROTOTYPES
 #include <math.h>
 #include <stdio.h>
@@ -48,6 +50,46 @@ static int require_packaged_module(HMODULE module, const char *name) {
   } while (0)
 #define LOAD(name) PFN_##name name = (PFN_##name)gipa(inst, #name)
 
+typedef VkResult(VKAPI_PTR *PFN_negotiate)(uint32_t *version);
+
+// The driver's own entry point, after the interface negotiation the loader would do.
+static PFN_vkGetInstanceProcAddr load_driver(const char *path) {
+#ifdef _WIN32
+  HMODULE lib = LoadLibraryA(path);
+  if (!lib) {
+    fprintf(stderr, "LoadLibrary %s failed: %lu\n", path, GetLastError());
+    return NULL;
+  }
+#define SYM(name) GetProcAddress(lib, name)
+#else
+  void *lib = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+  if (!lib) {
+    fprintf(stderr, "dlopen %s: %s\n", path, dlerror());
+    return NULL;
+  }
+#define SYM(name) dlsym(lib, name)
+#endif
+  PFN_negotiate negotiate = (PFN_negotiate)SYM("vk_icdNegotiateLoaderICDInterfaceVersion");
+  PFN_vkGetInstanceProcAddr gipa = (PFN_vkGetInstanceProcAddr)SYM("vk_icdGetInstanceProcAddr");
+#undef SYM
+  uint32_t version = 5;
+  if (!negotiate || !gipa || negotiate(&version) != VK_SUCCESS) {
+    fprintf(stderr, "%s is not a Vulkan driver of interface version 5\n", path);
+    return NULL;
+  }
+  printf("driver: %s, interface version %u\n", path, version);
+  return gipa;
+}
+
+// Whether the Vulkan loader is in the process: direct use must not bring it in.
+static int loader_loaded(void) {
+#ifdef _WIN32
+  return GetModuleHandleA(LIBNAME) != NULL;
+#else
+  return dlopen(LIBNAME, RTLD_NOW | RTLD_NOLOAD) != NULL;
+#endif
+}
+
 static PFN_vkGetInstanceProcAddr load_vulkan(void) {
 #ifdef _WIN32
   HMODULE lib = LoadLibraryA(LIBNAME);
@@ -67,8 +109,15 @@ static PFN_vkGetInstanceProcAddr load_vulkan(void) {
 #endif
 }
 
-int main(void) {
-  PFN_vkGetInstanceProcAddr gipa = load_vulkan();
+int main(int argc, char **argv) {
+  const char *direct = NULL;
+  if (argc == 3 && strcmp(argv[1], "--direct") == 0) {
+    direct = argv[2];
+  } else if (argc != 1) {
+    fprintf(stderr, "usage: %s [--direct DRIVER]\n", argv[0]);
+    return 2;
+  }
+  PFN_vkGetInstanceProcAddr gipa = direct ? load_driver(direct) : load_vulkan();
   if (!gipa) {
     fprintf(stderr, "failed to load vkGetInstanceProcAddr\n");
     return 1;
@@ -77,8 +126,8 @@ int main(void) {
   uint32_t api = VK_API_VERSION_1_0;
   LOAD(vkEnumerateInstanceVersion);
   if (vkEnumerateInstanceVersion) CHECK(vkEnumerateInstanceVersion(&api));
-  printf("loader: Vulkan %u.%u.%u\n", VK_API_VERSION_MAJOR(api), VK_API_VERSION_MINOR(api),
-         VK_API_VERSION_PATCH(api));
+  printf("%s: Vulkan %u.%u.%u\n", direct ? "instance" : "loader", VK_API_VERSION_MAJOR(api),
+         VK_API_VERSION_MINOR(api), VK_API_VERSION_PATCH(api));
 
   LOAD(vkCreateInstance);
   VkApplicationInfo app = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -153,7 +202,8 @@ int main(void) {
     return 1;
   }
 #ifdef _WIN32
-  if (!require_packaged_module(GetModuleHandleA("vulkan_lvp.dll"), "vulkan_lvp.dll")) return 1;
+  if (!direct && !require_packaged_module(GetModuleHandleA("vulkan_lvp.dll"), "vulkan_lvp.dll"))
+    return 1;
 #endif
 
   float priority = 1.0f;
@@ -290,6 +340,10 @@ int main(void) {
   vkUnmapMemory(dev, mem);
   if (bad) {
     fprintf(stderr, "compute: %d of %d results wrong\n", bad, N);
+    return 1;
+  }
+  if (direct && loader_loaded()) {
+    fprintf(stderr, "the Vulkan loader was loaded, though the driver was called directly\n");
     return 1;
   }
   printf("ok: compute shader compiled, ran %d invocations, every result checked\n", N);

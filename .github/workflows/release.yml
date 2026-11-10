@@ -172,8 +172,38 @@ jobs:
             build/windows-msvc/**/meson-logs/meson-log.txt
             build/windows-msvc/**/CMakeFiles/CMakeConfigureLog.yaml
 
-  publish:
+  compress:
     needs: [linux, windows]
+    # A test of one platform skips the other's job; compress what was built.
+    if: ${{ !cancelled() && !failure() }}
+    name: Compress drivers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Compress each driver for embedding
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q brotli
+          shopt -s nullglob
+          packages=(dist/*.tar.gz dist/*.zip)
+          [ ${#packages[@]} -gt 0 ] || { echo "no packages"; exit 1; }
+          scripts/compress.sh "${packages[@]}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: drivers
+          path: dist/*.br
+          if-no-files-found: error
+
+  publish:
+    needs: [linux, windows, compress]
     if: github.event_name == 'release' || inputs.publish
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -189,5 +219,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd dist
-          for f in *.tar.gz *.zip; do sha256sum "$f" > "$f.sha256"; done
-          gh release upload "$RELEASE_TAG" *.tar.gz *.zip *.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+          for f in *.tar.gz *.zip *.br; do sha256sum "$f" > "$f.sha256"; done
+          gh release upload "$RELEASE_TAG" *.tar.gz *.zip *.br *.sha256 --clobber --repo "$GITHUB_REPOSITORY"

@@ -43,10 +43,20 @@ licenses/
 THIRD_PARTY.md
 ```
 
+**valle-lavapipe-{version}-{platform}.so.br / .dll.br**
+
+The driver of each package alone, Brotli-compressed (quality 9, window 24), for an executable to
+embed: on Linux, 21 MB from 65 MB on ARM64 and 23 MB from 73 MB on x86_64. Valle carries it
+this way.
+
 ## Use
 
-`valle install` downloads, verifies and sets this up. By hand, after checking the SHA-256 and
-extracting:
+Valle embeds the driver and calls it directly, without the Vulkan loader: it loads the library,
+negotiates interface version 5 through `vk_icdNegotiateLoaderICDInterfaceVersion`, and creates
+its instance through `vk_icdGetInstanceProcAddr`. No environment, manifest or registry is read,
+so this works in elevated Windows processes too.
+
+To use the loader instead, after checking the SHA-256 and extracting:
 
 ```bash
 # Linux
@@ -81,8 +91,10 @@ probe on AlmaLinux 8, Ubuntu 22.04, Debian 12 and Ubuntu 24.04. Windows: LLVM, L
 are built from source ([build-windows.ps1](scripts/build-windows.ps1)) on `windows-2025-vs2026`
 and `windows-11-arm`. Both native architectures run the same compute probe against the
 extracted archive ([run-windows.ps1](tests/run-windows.ps1)). The probe checks the DLL paths,
-requires an llvmpipe CPU device, and verifies 256 compute results. A second run must fail with
-the packaged driver removed. Any temporary registry registration is restored afterwards.
+requires an llvmpipe CPU device, and verifies 256 compute results. It runs again calling the
+driver directly, as Valle does, and requires that the loader stays unloaded; on Linux each
+distribution runs this too. A last run must fail with the packaged driver removed. Any temporary
+registry registration is restored afterwards.
 
 To build on a matching Windows host with Visual Studio C++ tools, Windows SDK and Python 3:
 
@@ -101,7 +113,9 @@ manylinux image or Windows runner image version). A changed key rebuilds LLVM; a
 cache skips its compilation. Later build or test failures do not discard a completed LLVM
 cache. Mesa, Vulkan Loader, packaging and runtime tests still run every time.
 
-Publishing a release runs [release.yml](.github/workflows/release.yml) and uploads the packages.
+Publishing a release runs [release.yml](.github/workflows/release.yml) and uploads the packages,
+with each driver compressed for embedding by [compress.sh](scripts/compress.sh); test runs
+compress them too, into the `drivers` artifact.
 Running the workflow manually with `publish` unset builds and tests without uploading.
 Set `platform` to `windows` or `linux` to test only that platform's two architectures;
 the default `all` tests all four packages. Publishing always builds and tests all four.
